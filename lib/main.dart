@@ -208,7 +208,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (await _activeTab.controller.canGoBack()) {
       await _activeTab.controller.goBack();
     } else if (_activeTab.url != null) {
-      setState(() => _activeTab.url = null);
+      setState(() {
+        _activeTab.url = null;
+        _syncUrlBar();
+      });
     }
   }
 
@@ -414,7 +417,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
         } else if (tab.url != null) {
           // Tidak ada riwayat WebView lagi: kembali ke beranda aplikasi,
           // bukan keluar aplikasi.
-          setState(() => tab.url = null);
+          setState(() {
+            tab.url = null;
+            _syncUrlBar();
+          });
         } else {
           SystemNavigator.pop();
         }
@@ -428,7 +434,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
             tooltip: 'Kembali',
             onPressed: _goBack,
           ),
-          title: TextField(
+          // Di beranda (belum ada halaman): bilah URL disembunyikan —
+          // beranda sudah punya kapsul carinya sendiri.
+          title: tab.url == null
+              ? null
+              : TextField(
             controller: _urlController,
             focusNode: _urlFocusNode,
             textInputAction: TextInputAction.go,
@@ -461,16 +471,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ),
           ),
           actions: <Widget>[
-            IconButton(
-              icon: const Icon(Icons.arrow_forward),
-              tooltip: 'Maju',
-              onPressed: _goForward,
-            ),
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Muat ulang',
-              onPressed: _reload,
-            ),
+            // Maju dan muat ulang hanya ada bila sedang membuka halaman.
+            if (tab.url != null)
+              IconButton(
+                icon: const Icon(Icons.arrow_forward),
+                tooltip: 'Maju',
+                onPressed: _goForward,
+              ),
+            if (tab.url != null)
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Muat ulang',
+                onPressed: _reload,
+              ),
             _TabCountButton(
               count: _tabs.length,
               incognito: incognito,
@@ -558,7 +571,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
         body: Stack(
           children: <Widget>[
             WebViewWidget(controller: tab.controller),
-            if (tab.url == null) HomeView(onNavigate: _navigate),
+            if (tab.url == null) HomeView(onNavigate: _navigate, incognito: incognito),
           ],
         ),
       ),

@@ -17,11 +17,18 @@ const List<String> _searchHints = <String>[
 /// Beranda tab baru ala Chrome: wordmark Google, kapsul cari, dan grid
 /// pintasan situs.
 class HomeView extends StatefulWidget {
-  const HomeView({super.key, required this.onNavigate});
+  const HomeView({
+    super.key,
+    required this.onNavigate,
+    this.incognito = false,
+  });
 
   /// Dipanggil dengan URL tujuan saat pintasan ditekan atau pencarian
   /// dikirim.
   final void Function(String url) onNavigate;
+
+  /// Tab samaran: beranda ikut gelap seperti bilah atas.
+  final bool incognito;
 
   @override
   State<HomeView> createState() => _HomeViewState();
@@ -96,7 +103,13 @@ class _HomeViewState extends State<HomeView> {
             child: child,
           ),
           const SizedBox(height: 6),
-          Text(label, style: const TextStyle(fontSize: 12)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: widget.incognito ? Colors.white70 : null,
+            ),
+          ),
         ],
       ),
     );
@@ -104,7 +117,14 @@ class _HomeViewState extends State<HomeView> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    final incognito = widget.incognito;
+    // Latar penuh dan tidak tembus pandang: halaman situs di bawah
+    // (WebView) tidak boleh berbayang menembus beranda.
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: incognito ? const Color(0xFF212121) : Colors.white,
+      child: SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       child: Column(
         children: <Widget>[
@@ -127,9 +147,20 @@ class _HomeViewState extends State<HomeView> {
             controller: _searchController,
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _submitSearch(),
+            style: TextStyle(
+              color: incognito ? Colors.white : Colors.black87,
+            ),
             decoration: InputDecoration(
               hintText: _searchHints[_hintIndex],
-              prefixIcon: const Icon(Icons.search),
+              hintStyle: TextStyle(
+                color: incognito ? Colors.white54 : Colors.black45,
+              ),
+              prefixIcon: Icon(
+                Icons.search,
+                color: incognito ? Colors.white54 : null,
+              ),
+              filled: incognito,
+              fillColor: incognito ? Colors.grey[800] : null,
               suffixIcon: IconButton(
                 icon: const Icon(Icons.arrow_forward),
                 onPressed: _submitSearch,
@@ -217,6 +248,7 @@ class _HomeViewState extends State<HomeView> {
             onOpen: (url) => widget.onNavigate(url),
           ),
         ],
+      ),
       ),
     );
   }
