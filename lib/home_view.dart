@@ -1,6 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'trending.dart';
 import 'utils.dart';
+
+/// Teks hint kapsul cari yang berputar tiap beberapa detik.
+const List<String> _searchHints = <String>[
+  'Cari di Google atau ketik URL',
+  'Coba cari berita hari ini',
+  'Ketik alamat situs, mis. youtube.com',
+  'Cari resep, lagu, atau apa saja',
+  'Apa yang ingin kamu cari?',
+];
 
 /// Beranda tab baru ala Chrome: wordmark Google, kapsul cari, dan grid
 /// pintasan situs.
@@ -17,9 +29,28 @@ class HomeView extends StatefulWidget {
 
 class _HomeViewState extends State<HomeView> {
   final TextEditingController _searchController = TextEditingController();
+  Timer? _hintTimer;
+  int _hintIndex = 0;
+  List<TrendingItem> _trending = <TrendingItem>[];
+
+  @override
+  void initState() {
+    super.initState();
+    // Hint cari berputar tiap 4 detik.
+    _hintTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      setState(() => _hintIndex = (_hintIndex + 1) % _searchHints.length);
+    });
+    // Berita trending (gagal dimuat = beranda tetap jalan tanpa berita).
+    fetchTrendingNews().then((items) {
+      if (!mounted) return;
+      setState(() => _trending = items);
+    });
+  }
 
   @override
   void dispose() {
+    _hintTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -91,13 +122,13 @@ class _HomeViewState extends State<HomeView> {
             ],
           ),
           const SizedBox(height: 24),
-          // Kapsul cari.
+          // Kapsul cari (hint berputar).
           TextField(
             controller: _searchController,
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _submitSearch(),
             decoration: InputDecoration(
-              hintText: 'Cari di Google atau ketik URL',
+              hintText: _searchHints[_hintIndex],
               prefixIcon: const Icon(Icons.search),
               suffixIcon: IconButton(
                 icon: const Icon(Icons.arrow_forward),
@@ -179,6 +210,11 @@ class _HomeViewState extends State<HomeView> {
                 ),
               ),
             ],
+          ),
+          // Berita trending (tidak muncul bila gagal dimuat).
+          TrendingSection(
+            items: _trending,
+            onOpen: (url) => widget.onNavigate(url),
           ),
         ],
       ),

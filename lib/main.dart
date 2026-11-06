@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import 'about_page.dart';
+import 'app_settings.dart';
+import 'bookmarks.dart';
 import 'downloads.dart';
+import 'history_page.dart';
 import 'home_view.dart';
 import 'settings_page.dart';
 import 'tab.dart';
@@ -43,7 +48,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   int _nextTabId = 1;
 
   /// Riwayat tab biasa saja (tab samaran tidak dicatat).
-  final List<String> _history = <String>[];
+  final List<HistoryEntry> _history = <HistoryEntry>[];
 
   final TextEditingController _urlController = TextEditingController();
   final FocusNode _urlFocusNode = FocusNode();
@@ -55,6 +60,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void initState() {
     super.initState();
     _createTabInternal();
+    // Muat setelan (AdBlock) dan bookmark yang tersimpan.
+    BrowserSettings.instance.init().then((_) {
+      if (mounted) setState(() {});
+    });
+    BookmarkStore.instance.init();
   }
 
   @override
@@ -131,7 +141,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
               if (title != null && title.isNotEmpty) tab.title = title;
               _syncUrlBar();
             });
-            if (!tab.isIncognito) _addHistory(url);
+            if (!tab.isIncognito) {
+              _addHistory(url, title ?? '');
+            }
+            // AdBlock: sembunyikan elemen iklan di halaman.
+            if (BrowserSettings.instance.adBlockEnabled) {
+              try {
+                await tab.controller.runJavaScript(adBlockHideJs);
+              } catch (_) {
+                // Halaman sudah pergi; abaikan.
+              }
+            }
           },
           onNavigationRequest: (request) {
             if (request.isMainFrame && isDownloadUrl(request.url)) {
@@ -143,6 +163,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   ),
                 ),
               );
+              return NavigationDecision.prevent;
+            }
+            // AdBlock: blokir navigasi ke host iklan (bukan googlevideo).
+            if (BrowserSettings.instance.adBlockEnabled &&
+                isAdUrl(request.url)) {
               return NavigationDecision.prevent;
             }
             return NavigationDecision.navigate;
@@ -172,9 +197,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _urlController.text = _activeTab.url ?? '';
   }
 
-  void _addHistory(String url) {
-    if (_history.isEmpty || _history.first != url) {
-      _history.insert(0, url);
+  void _addHistory(String url, String title) {
+    if (_history.isEmpty || _history.first.url != url) {
+      _history.insert(0, HistoryEntry(url: url, title: title));
       if (_history.length > 100) _history.removeLast();
     }
   }
@@ -233,6 +258,70 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (mounted) setState(() => _syncUrlBar());
   }
 
+  Future<void> _openHistory() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => HistoryPage(
+          entries: _history,
+          onOpen: (url) => _navigate(url),
+          onDelete: (url) {
+            setState(
+              () => _history.removeWhere((entry) => entry.url == url),
+            );
+          },
+          onClearAll: () => setState(() => _history.clear()),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openBookmarks() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => BookmarkPage(
+          onOpen: (url) => _navigate(url),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAbout() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => AboutPage(
+          onOpenLink: (url) {
+            Navigator.of(context).pop();
+            _navigate(url);
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggleBookmark() async {
+    final tab = _activeTab;
+    final url = tab.url;
+    if (url == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Belum ada halaman untuk disimpan')),
+      );
+      return;
+    }
+    if (BookmarkStore.instance.isBookmarked(url)) {
+      await BookmarkStore.instance.remove(url);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bookmark dihapus')),
+      );
+    } else {
+      await BookmarkStore.instance.add(tab.title, url);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bookmark disimpan')),
+      );
+    }
+  }
+
   Future<void> _openDownloads() async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (context) => const DownloadsPage()),
@@ -243,6 +332,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => SettingsPage(
+          adBlockEnabled: BrowserSettings.instance.adBlockEnabled,
+          onAdBlockChanged: (value) {
+            BrowserSettings.instance.setAdBlockEnabled(value);
+            if (mounted) setState(() {});
+          },
           onClearHistory: () => _history.clear(),
           onClearCookies: () {
             WebViewCookieManager().clearCookies();
@@ -250,6 +344,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
           onClearCache: () {
             _activeTab.controller.clearCache();
           },
+          onOpenLink: (url) => _navigate(url),
         ),
       ),
     );
@@ -263,11 +358,16 @@ class _BrowserScreenState extends State<BrowserScreen> {
       );
       return;
     }
-    await Clipboard.setData(ClipboardData(text: url));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Tautan disalin')),
-    );
+    // Lembar berbagi sistem; bila gagal, jatuh ke salin tautan.
+    try {
+      await Share.share(url);
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: url));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tautan disalin')),
+      );
+    }
   }
 
   void _onMenuSelected(String value) {
@@ -276,6 +376,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
         _newTab();
       case 'new_incognito':
         _newTab(incognito: true);
+      case 'history':
+        _openHistory();
+      case 'bookmarks':
+        _openBookmarks();
+      case 'bookmark_add':
+        _toggleBookmark();
       case 'downloads':
         _openDownloads();
       case 'share':
@@ -286,6 +392,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
         _toggleDesktop();
       case 'settings':
         _openSettings();
+      case 'about':
+        _openAbout();
     }
   }
 
@@ -381,6 +489,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   child: Text('Tab samaran baru'),
                 ),
                 const PopupMenuItem<String>(
+                  value: 'history',
+                  child: Text('Riwayat'),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'bookmarks',
+                  child: Text('Bookmark'),
+                ),
+                PopupMenuItem<String>(
+                  value: 'bookmark_add',
+                  child: Text(
+                    tab.url != null &&
+                            BookmarkStore.instance.isBookmarked(tab.url!)
+                        ? 'Hapus bookmark'
+                        : 'Simpan bookmark',
+                  ),
+                ),
+                const PopupMenuItem<String>(
                   value: 'downloads',
                   child: Text('Unduhan'),
                 ),
@@ -408,6 +533,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 const PopupMenuItem<String>(
                   value: 'settings',
                   child: Text('Setelan'),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'about',
+                  child: Text('Tentang Chrome Lite'),
                 ),
               ],
             ),

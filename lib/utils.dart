@@ -59,3 +59,52 @@ String fileNameFromUrl(String url) {
   final name = uri.pathSegments.last;
   return name.isEmpty ? 'unduhan' : name;
 }
+
+// ---------- AdBlock ----------
+
+/// Domain iklan yang diblokir (dicocokkan sebagai akhiran host).
+///
+/// Sengaja TIDAK berisi googlevideo (konten video) dan TIDAK berisi
+/// domain Google utama — hanya jaringan iklan.
+const List<String> adBlockHosts = <String>[
+  'doubleclick.net',
+  'googlesyndication.com',
+  'googleadservices.com',
+  'adservice.google.com',
+  'ads.youtube.com',
+  'adsystem.com',
+  'adnxs.com',
+  'criteo.com',
+  'taboola.com',
+  'outbrain.com',
+];
+
+/// Apakah URL ini menuju iklan (host iklan, atau path iklan Google).
+bool isAdUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null) return false;
+  final host = uri.host.toLowerCase();
+  for (final adHost in adBlockHosts) {
+    if (host == adHost || host.endsWith('.$adHost')) return true;
+  }
+  // Jalur iklan Google (mis. google.com/pagead/...).
+  if (uri.path.toLowerCase().contains('/pagead/')) return true;
+  return false;
+}
+
+/// JavaScript penyembunyi elemen iklan di halaman (dijalankan setelah
+/// halaman selesai dimuat, bila AdBlock aktif).
+const String adBlockHideJs = '''
+(function() {
+  try {
+    var css = '[id*="ad-"],[id*="_ad"],[id^="google_ads"],[class*="ad-"],'
+      + '[class*="ads-"],[class*="advert"],iframe[src*="doubleclick"],'
+      + 'iframe[src*="googlesyndication"],iframe[src*="googleads"],'
+      + 'ytd-ad-slot,ytd-display-ad-renderer,.ytp-ad-module{'
+      + 'display:none !important;}';
+    var s = document.createElement('style');
+    s.textContent = css;
+    document.documentElement.appendChild(s);
+  } catch (e) {}
+})();
+''';
