@@ -7,7 +7,10 @@ plugins {
 
 android {
     namespace = "com.modol.chrome_lite_flutter"
-    compileSdk = flutter.compileSdkVersion
+    // compileSdk 36: WAJIB — plugin background_downloader (androidx.work
+    // 2.11.0 / core 1.17.0) menuntut AGP >= 8.9.1 dan compileSdk >= 36.
+    // targetSdk tetap default Flutter (35); keduanya boleh berbeda.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
