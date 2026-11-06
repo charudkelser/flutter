@@ -182,6 +182,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
   Future<void> _goBack() async {
     if (await _activeTab.controller.canGoBack()) {
       await _activeTab.controller.goBack();
+    } else if (_activeTab.url != null) {
+      setState(() => _activeTab.url = null);
     }
   }
 
@@ -301,6 +303,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
         if (didPop) return;
         if (tab.url != null && await tab.controller.canGoBack()) {
           await tab.controller.goBack();
+        } else if (tab.url != null) {
+          // Tidak ada riwayat WebView lagi: kembali ke beranda aplikasi,
+          // bukan keluar aplikasi.
+          setState(() => tab.url = null);
         } else {
           SystemNavigator.pop();
         }
