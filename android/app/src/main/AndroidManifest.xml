@@ -4,6 +4,9 @@
          Template Flutter hanya menaruhnya di manifest debug/profile,
          bukan di manifest utama (release). -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Izin notifikasi (Android 13+): dipakai plugin unduhan latar
+         untuk notifikasi progres. Di bawah Android 13 tidak berpengaruh. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="Chrome Lite Flutter"
         android:name="${applicationName}"
