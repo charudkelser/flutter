@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Izin internet: WAJIB agar WebView bisa membuka situs. Tanpa ini
+         WebView gagal dengan net::ERR_CACHE_MISS (bug v1.0.5/1.0.6).
+         Template Flutter hanya menaruhnya di manifest debug/profile,
+         bukan di manifest utama (release). -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="Chrome Lite Flutter"
         android:name="${applicationName}"
