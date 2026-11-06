@@ -67,6 +67,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
       if (mounted) setState(() {});
     });
     BookmarkStore.instance.init();
+    // Siapkan notifikasi unduhan + pulihkan daftar unduhan tersimpan.
+    DownloadManager.instance.init();
+    // Ketukan pada notifikasi unduhan membuka halaman Unduhan.
+    DownloadManager.onOpenDownloads = () {
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (context) => const DownloadsPage()),
+      );
+    };
   }
 
   @override
