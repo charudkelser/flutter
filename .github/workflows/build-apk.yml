@@ -18,15 +18,6 @@ jobs:
         with:
           flutter-version: '3.27.0'
           channel: 'stable'
-      - name: Regenerate Gradle wrapper
-        run: |
-          cd android
-          if ! command -v gradle >/dev/null 2>&1; then
-            curl -sL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.3-bin.zip
-            unzip -q /tmp/gradle.zip -d /tmp
-            export PATH=/tmp/gradle-8.3/bin:$PATH
-          fi
-          gradle wrapper --gradle-version 8.3
       - run: flutter pub get
       - run: flutter build apk --release
       - name: Create release with APK
