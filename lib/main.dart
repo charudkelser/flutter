@@ -426,8 +426,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
         }
       },
       child: Scaffold(
+        // Latar layar penuh (termasuk di balik status bar) ikut warna beranda.
+        backgroundColor:
+            tab.url == null ? (incognito ? homeBgDark : homeBgLight) : null,
         appBar: AppBar(
-          backgroundColor: incognito ? Colors.grey[900] : null,
+          // Di beranda: samakan dengan latar beranda supaya tidak belang.
+          backgroundColor: tab.url == null
+              ? (incognito ? homeBgDark : homeBgLight)
+              : (incognito ? Colors.grey[900] : null),
           foregroundColor: incognito ? Colors.white : null,
           // Di beranda: ikon rumah seperti Chrome; di halaman: panah kembali.
           leading: tab.url == null

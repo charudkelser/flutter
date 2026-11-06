@@ -15,8 +15,9 @@ const List<String> _searchHints = <String>[
 ];
 
 /// Warna latar beranda ala Chrome (biru pucat); samaran gelap.
-const Color _homeBgLight = Color(0xFFE9EEF6);
-const Color _homeBgDark = Color(0xFF212121);
+/// Dipakai juga oleh bilah atas supaya warnanya tidak belang.
+const Color homeBgLight = Color(0xFFE9EEF6);
+const Color homeBgDark = Color(0xFF212121);
 
 /// Warna kapsul cari dan tombol pil ala Chrome.
 const Color _pillLight = Color(0xFFD7E3F4);
@@ -177,7 +178,7 @@ class _HomeViewState extends State<HomeView> {
     return Container(
       width: double.infinity,
       height: double.infinity,
-      color: incognito ? _homeBgDark : _homeBgLight,
+      color: incognito ? homeBgDark : homeBgLight,
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         child: Column(
