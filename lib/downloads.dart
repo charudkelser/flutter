@@ -4,9 +4,43 @@ import 'dart:io';
 
 import 'package:background_downloader/background_downloader.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_settings.dart';
+import 'download_settings.dart';
 import 'utils.dart';
+
+/// Saluran ke kode Android (MainActivity.kt) untuk info penyimpanan
+/// perangkat dan membuka berkas dengan aplikasi lain.
+const MethodChannel _storageChannel = MethodChannel('modol/storage');
+
+/// Info penyimpanan perangkat: (terpakai, total) dalam byte.
+Future<(int, int)?> getStorageInfo() async {
+  try {
+    final result =
+        await _storageChannel.invokeMapMethod<String, dynamic>('getStorageInfo');
+    if (result == null) return null;
+    final used = (result['usedBytes'] as num?)?.toInt();
+    final total = (result['totalBytes'] as num?)?.toInt();
+    if (used == null || total == null || total <= 0) return null;
+    return (used, total);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Buka berkas dengan aplikasi lain (pemutar, penampil, dst).
+/// Mengembalikan false bila tidak ada aplikasi yang bisa membukanya.
+Future<bool> openFile(String path) async {
+  try {
+    final ok = await _storageChannel.invokeMethod<bool>('openFile', path);
+    return ok ?? false;
+  } catch (_) {
+    return false;
+  }
+}
 
 enum DownloadStatus { downloading, paused, done, failed }
 
@@ -17,11 +51,21 @@ class DownloadItem {
     required this.url,
     required this.fileName,
     this.task,
+    this.destination = 'downloads',
+    this.subfolder = '',
   });
 
   final String taskId;
   final String url;
   final String fileName;
+
+  /// Tujuan berkas selesai (nama [SharedStorage], mis. 'downloads').
+  /// Dicatat saat unduhan dibuat, jadi perubahan setelan lokasi hanya
+  /// berlaku untuk unduhan BARU; yang sedang berjalan tidak pindah.
+  final String destination;
+
+  /// Subfolder di dalam tujuan (mis. 'ROM'), '' = langsung di tujuan.
+  final String subfolder;
 
   /// Tugas plugin (untuk jeda/lanjut/batal). Diisi saat dibuat atau
   /// dipulihkan dari database plugin.
@@ -48,6 +92,8 @@ class DownloadItem {
         'savedPath': savedPath,
         'sharedPath': sharedPath,
         'error': error,
+        'destination': destination,
+        'subfolder': subfolder,
       };
 
   factory DownloadItem.fromJson(Map<String, dynamic> json) {
@@ -55,6 +101,8 @@ class DownloadItem {
       taskId: json['id']?.toString() ?? '',
       url: json['url'] as String? ?? '',
       fileName: json['fileName'] as String? ?? 'unduhan',
+      destination: json['destination'] as String? ?? 'downloads',
+      subfolder: json['subfolder'] as String? ?? '',
     );
     final statusName = json['status'] as String? ?? 'failed';
     item.status = DownloadStatus.values.firstWhere(
@@ -314,17 +362,23 @@ class DownloadManager {
     }
   }
 
-  /// Pindahkan berkas selesai ke folder Unduhan publik. Dijaga supaya
-  /// hanya berjalan sekali per item.
+  /// Pindahkan berkas selesai ke lokasi tujuan yang dicatat saat
+  /// unduhan dibuat (folder bersama + subfolder). Dijaga supaya hanya
+  /// berjalan sekali per item.
   Future<void> _moveToShared(DownloadItem item) async {
     if (item.sharedPath != null) return;
     if (!_moving.add(item.taskId)) return;
     try {
       final task = item.task;
       if (task == null) return;
+      final destination = SharedStorage.values.firstWhere(
+        (s) => s.name == item.destination,
+        orElse: () => SharedStorage.downloads,
+      );
       final newPath = await FileDownloader().moveToSharedStorage(
         task,
-        SharedStorage.downloads,
+        destination,
+        directory: item.subfolder,
       );
       if (newPath != null) {
         item.sharedPath = newPath;
@@ -366,14 +420,18 @@ class DownloadManager {
   }
 
   /// Mulai unduhan baru untuk [url]. Tidak melempar; kegagalan dicatat
-  /// di status item.
+  /// di status item. Lokasi tujuan dicatat dari setelan saat ini, jadi
+  /// perubahan setelan sesudahnya tidak mengubah unduhan ini.
   Future<void> startDownload(String url) async {
     final task = await _buildTask(url, fileNameFromUrl(url));
+    final settings = BrowserSettings.instance;
     final item = DownloadItem(
       taskId: task.taskId,
       url: url,
       fileName: task.filename,
       task: task,
+      destination: settings.downloadLocation.name,
+      subfolder: settings.downloadSubfolder,
     );
     item.savedPath = await task.filePath();
     items.value = <DownloadItem>[...items.value, item];
@@ -449,134 +507,349 @@ class DownloadManager {
     }
     _removeItemInternal(item);
   }
+
+  /// Bagikan berkas selesai lewat lembar berbagi sistem.
+  /// Mengembalikan false bila berkas belum ada di penyimpanan.
+  Future<bool> shareFile(DownloadItem item) async {
+    final path = item.sharedPath ?? item.savedPath;
+    if (path == null) return false;
+    if (!await File(path).exists()) return false;
+    try {
+      await Share.shareXFiles(<XFile>[XFile(path)]);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
-String _formatBytes(int bytes) {
+/// Format ukuran ala Chrome Indonesia: koma sebagai desimal,
+/// 2 angka di belakang koma untuk MB/GB ("48,38 MB", "3,80 GB").
+String formatBytesId(int bytes) {
   if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  if (bytes < 1024 * 1024) {
+    return '${(bytes / 1024).toStringAsFixed(1).replaceAll('.', ',')} KB';
+  }
   if (bytes < 1024 * 1024 * 1024) {
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(2).replaceAll('.', ',')} MB';
   }
-  return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2).replaceAll('.', ',')} GB';
 }
 
-String _formatEta(int seconds) {
-  final m = seconds ~/ 60;
-  final s = seconds % 60;
-  if (m >= 60) {
-    final h = m ~/ 60;
-    return '${h.toString().padLeft(2, '0')}:${(m % 60).toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-  }
-  return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+/// Format sisa waktu ala Chrome Indonesia: "45 detik lagi",
+/// "13 menit lagi", "1 jam 5 menit lagi".
+String formatEtaId(int seconds) {
+  if (seconds < 60) return '$seconds detik lagi';
+  if (seconds < 3600) return '${seconds ~/ 60} menit lagi';
+  final hours = seconds ~/ 3600;
+  final minutes = (seconds % 3600) ~/ 60;
+  if (minutes == 0) return '$hours jam lagi';
+  return '$hours jam $minutes menit lagi';
 }
 
-/// Halaman Daftar Unduhan.
-class DownloadsPage extends StatelessWidget {
+/// Halaman Unduhan ala Chrome asli.
+///
+/// - AppBar: judul "Download", gerigi (Setelan unduhan), kaca pembesar
+///   (cari berdasarkan nama berkas), X (tutup halaman).
+/// - Baris pemakaian penyimpanan perangkat di bawah AppBar.
+/// - Seksi "Baru saja" di atas daftar.
+/// - Tiap item: lingkaran di kiri (jeda biru saat mengunduh, berkas
+///   abu-abu saat selesai), nama berkas dipotong elipsis, baris status
+///   ala Chrome ("48,38 MB / 3,80 GB • 13 menit lagi"). Tanpa progress
+///   bar dan tanpa jalur berkas internal.
+/// - Kanan item: X (batalkan) saat mengunduh/dijeda; menu ⋮ saat
+///   selesai (Buka, Bagikan, Hapus dari daftar).
+class DownloadsPage extends StatefulWidget {
   const DownloadsPage({super.key});
 
-  String _sizeText(DownloadItem item) {
-    if (item.total <= 0) {
-      return item.received > 0 ? ' • ${_formatBytes(item.received)}' : '';
-    }
-    return ' • ${_formatBytes(item.received)} / ${_formatBytes(item.total)}';
+  @override
+  State<DownloadsPage> createState() => _DownloadsPageState();
+}
+
+class _DownloadsPageState extends State<DownloadsPage> {
+  bool _searching = false;
+  String _query = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  /// Teks "69,99 MB terpakai dari 116,56 GB"; null = belum termuat
+  /// atau gagal dibaca (baris disembunyikan).
+  String? _storageText;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStorageInfo();
   }
 
-  String _speedText(DownloadItem item) {
-    if (item.speed <= 0) return '';
-    final speed = ' • ${_formatBytes(item.speed.round())}/s';
-    if (item.etaSeconds < 0) return speed;
-    return '$speed • sisa ${_formatEta(item.etaSeconds)}';
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
+  Future<void> _loadStorageInfo() async {
+    final info = await getStorageInfo();
+    if (!mounted || info == null) return;
+    setState(() {
+      _storageText =
+          '${formatBytesId(info.$1)} terpakai dari ${formatBytesId(info.$2)}';
+    });
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  /// Baris status ala Chrome untuk satu item.
   String _statusText(DownloadItem item) {
-    final size = _sizeText(item);
+    final String size;
+    if (item.total > 0) {
+      size =
+          '${formatBytesId(item.received)} / ${formatBytesId(item.total)}';
+    } else if (item.received > 0) {
+      size = formatBytesId(item.received);
+    } else {
+      size = '';
+    }
     switch (item.status) {
       case DownloadStatus.downloading:
-        return 'Mengunduh... ${(item.progress * 100).toStringAsFixed(0)}%$size${_speedText(item)}';
+        if (size.isEmpty) return 'Mengunduh…';
+        if (item.etaSeconds >= 0) {
+          return '$size • ${formatEtaId(item.etaSeconds)}';
+        }
+        return size;
       case DownloadStatus.paused:
-        return 'Dijeda ${(item.progress * 100).toStringAsFixed(0)}%$size';
+        return size.isEmpty ? 'Dijeda' : 'Dijeda • $size';
       case DownloadStatus.done:
-        return 'Selesai$size';
+        return size;
       case DownloadStatus.failed:
-        return 'Gagal${item.error == null ? '' : ': ${item.error}'}';
+        return item.error == null ? 'Gagal' : 'Gagal: ${item.error}';
     }
+  }
+
+  /// Lingkaran di kiri item. Diketuk untuk jeda/lanjutkan saat
+  /// mengunduh atau dijeda (seperti Chrome).
+  Widget _leadingCircle(DownloadItem item) {
+    final bool active = item.status == DownloadStatus.downloading ||
+        item.status == DownloadStatus.paused;
+    final Color bg =
+        active ? const Color(0xFFE8F0FE) : const Color(0xFFF1F3F4);
+    final Color fg =
+        active ? const Color(0xFF1A73E8) : const Color(0xFF5F6368);
+    final IconData icon;
+    switch (item.status) {
+      case DownloadStatus.downloading:
+        icon = Icons.pause;
+        break;
+      case DownloadStatus.paused:
+        icon = Icons.play_arrow;
+        break;
+      case DownloadStatus.done:
+        icon = Icons.insert_drive_file;
+        break;
+      case DownloadStatus.failed:
+        icon = Icons.error_outline;
+        break;
+    }
+    final VoidCallback? onTap;
+    if (item.status == DownloadStatus.downloading) {
+      onTap = () => DownloadManager.instance.pauseDownload(item);
+    } else if (item.status == DownloadStatus.paused) {
+      onTap = () => DownloadManager.instance.resumeDownload(item);
+    } else {
+      onTap = null;
+    }
+    return InkWell(
+      onTap: onTap,
+      customBorder: const CircleBorder(),
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+        child: Icon(icon, color: fg, size: 24),
+      ),
+    );
+  }
+
+  Widget _trailing(DownloadItem item) {
+    if (item.status == DownloadStatus.downloading ||
+        item.status == DownloadStatus.paused) {
+      return IconButton(
+        icon: const Icon(Icons.close),
+        tooltip: 'Batalkan',
+        onPressed: () => DownloadManager.instance.cancelDownload(item),
+      );
+    }
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert),
+      onSelected: (value) async {
+        if (value == 'hapus') {
+          DownloadManager.instance.removeItem(item);
+          return;
+        }
+        if (item.status != DownloadStatus.done) return;
+        final path = item.sharedPath ?? item.savedPath;
+        if (path == null) {
+          _showMessage('Berkas tidak ditemukan');
+          return;
+        }
+        if (value == 'buka') {
+          final ok = await openFile(path);
+          if (!ok && mounted) {
+            _showMessage('Tidak ada aplikasi untuk membuka berkas ini');
+          }
+        } else if (value == 'bagikan') {
+          final ok = await DownloadManager.instance.shareFile(item);
+          if (!ok && mounted) {
+            _showMessage('Berkas tidak bisa dibagikan');
+          }
+        }
+      },
+      itemBuilder: (context) {
+        final entries = <PopupMenuEntry<String>>[];
+        if (item.status == DownloadStatus.done) {
+          entries.add(const PopupMenuItem<String>(
+            value: 'buka',
+            child: Text('Buka'),
+          ));
+          entries.add(const PopupMenuItem<String>(
+            value: 'bagikan',
+            child: Text('Bagikan'),
+          ));
+        }
+        entries.add(const PopupMenuItem<String>(
+          value: 'hapus',
+          child: Text('Hapus dari daftar'),
+        ));
+        return entries;
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Unduhan')),
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        title: _searching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Cari unduhan',
+                  border: InputBorder.none,
+                ),
+                onChanged: (value) {
+                  setState(() => _query = value.trim().toLowerCase());
+                },
+              )
+            : const Text('Download'),
+        actions: <Widget>[
+          if (!_searching)
+            IconButton(
+              icon: const Icon(Icons.settings),
+              tooltip: 'Setelan unduhan',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const DownloadSettingsPage(),
+                  ),
+                );
+              },
+            ),
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: 'Cari',
+            onPressed: () {
+              setState(() {
+                if (_searching) {
+                  _searching = false;
+                  _query = '';
+                  _searchController.clear();
+                } else {
+                  _searching = true;
+                }
+              });
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.close),
+            tooltip: 'Tutup',
+            onPressed: () {
+              if (_searching) {
+                setState(() {
+                  _searching = false;
+                  _query = '';
+                  _searchController.clear();
+                });
+              } else {
+                Navigator.of(context).pop();
+              }
+            },
+          ),
+        ],
+      ),
       body: ValueListenableBuilder<List<DownloadItem>>(
         valueListenable: DownloadManager.instance.items,
         builder: (context, downloads, _) {
-          if (downloads.isEmpty) {
-            return const Center(
-              child: Text('Belum ada unduhan.'),
-            );
-          }
-          return ListView.builder(
-            itemCount: downloads.length,
-            itemBuilder: (context, index) {
-              final item = downloads[index];
-              return ListTile(
-                leading: const Icon(Icons.insert_drive_file),
-                title: Text(item.fileName),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(_statusText(item)),
-                    if (item.savedPath != null)
-                      Text(
-                        item.savedPath!,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    if (item.status == DownloadStatus.downloading)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: LinearProgressIndicator(
-                          value: item.progress > 0 ? item.progress : null,
+          final shown = _query.isEmpty
+              ? downloads
+              : downloads
+                  .where((item) =>
+                      item.fileName.toLowerCase().contains(_query))
+                  .toList();
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              if (_storageText != null)
+                Padding(
+                  padding:
+                      const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text(
+                    _storageText!,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Text(
+                  'Baru saja',
+                  style: TextStyle(fontSize: 15),
+                ),
+              ),
+              Expanded(
+                child: shown.isEmpty
+                    ? Center(
+                        child: Text(
+                          downloads.isEmpty
+                              ? 'Belum ada unduhan.'
+                              : 'Tidak ada yang cocok.',
                         ),
+                      )
+                    : ListView.builder(
+                        itemCount: shown.length,
+                        itemBuilder: (context, index) {
+                          final item = shown[index];
+                          return ListTile(
+                            leading: _leadingCircle(item),
+                            title: Text(
+                              item.fileName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              _statusText(item),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: _trailing(item),
+                          );
+                        },
                       ),
-                  ],
-                ),
-                isThreeLine: item.savedPath != null,
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    if (item.status == DownloadStatus.downloading)
-                      IconButton(
-                        icon: const Icon(Icons.pause),
-                        tooltip: 'Jeda',
-                        onPressed: () =>
-                            DownloadManager.instance.pauseDownload(item),
-                      ),
-                    if (item.status == DownloadStatus.paused)
-                      IconButton(
-                        icon: const Icon(Icons.play_arrow),
-                        tooltip: 'Lanjutkan',
-                        onPressed: () =>
-                            DownloadManager.instance.resumeDownload(item),
-                      ),
-                    if (item.status == DownloadStatus.downloading ||
-                        item.status == DownloadStatus.paused)
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        tooltip: 'Batalkan',
-                        onPressed: () =>
-                            DownloadManager.instance.cancelDownload(item),
-                      ),
-                    if (item.status == DownloadStatus.done ||
-                        item.status == DownloadStatus.failed)
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        tooltip: 'Hapus dari daftar',
-                        onPressed: () =>
-                            DownloadManager.instance.removeItem(item),
-                      ),
-                  ],
-                ),
-              );
-            },
+              ),
+            ],
           );
         },
       ),

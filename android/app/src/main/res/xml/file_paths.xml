@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Jalur yang boleh dibagikan FileProvider untuk menu "Buka" di halaman
+     Unduhan: folder bersama perangkat (Unduhan, Gambar, dst.) dan folder
+     aplikasi (berkas selesai yang belum sempat dipindah). -->
+<paths>
+    <external-path name="external" path="." />
+    <files-path name="app_files" path="." />
+    <cache-path name="app_cache" path="." />
+</paths>
