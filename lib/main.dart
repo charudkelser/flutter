@@ -204,10 +204,29 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
   }
 
+  /// Ke beranda aplikasi (ikon home). Halaman WebView tetap tersimpan
+  /// di riwayat tab.
+  void _goHome() {
+    _urlFocusNode.unfocus();
+    setState(() {
+      _activeTab.url = null;
+      _syncUrlBar();
+    });
+  }
+
+  /// Tombol kembali HP: mundur di riwayat WebView; bila tidak ada riwayat,
+  /// kembali ke beranda. Tidak pernah diam tanpa hasil: bila baca riwayat
+  /// gagal, langsung ke beranda.
   Future<void> _goBack() async {
-    if (await _activeTab.controller.canGoBack()) {
-      await _activeTab.controller.goBack();
-    } else if (_activeTab.url != null) {
+    try {
+      if (await _activeTab.controller.canGoBack()) {
+        await _activeTab.controller.goBack();
+        return;
+      }
+    } catch (_) {
+      // WebView belum siap / gagal baca riwayat: jatuh ke beranda.
+    }
+    if (_activeTab.url != null) {
       setState(() {
         _activeTab.url = null;
         _syncUrlBar();
@@ -389,6 +408,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
         _openDownloads();
       case 'share':
         _share();
+      case 'forward':
+        _goForward();
       case 'reload':
         _reload();
       case 'desktop':
@@ -412,15 +433,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        if (tab.url != null && await tab.controller.canGoBack()) {
-          await tab.controller.goBack();
-        } else if (tab.url != null) {
-          // Tidak ada riwayat WebView lagi: kembali ke beranda aplikasi,
-          // bukan keluar aplikasi.
-          setState(() {
-            tab.url = null;
-            _syncUrlBar();
-          });
+        if (tab.url != null) {
+          // Masih membuka halaman: mundur (atau ke beranda bila tidak
+          // ada riwayat), bukan keluar aplikasi.
+          await _goBack();
         } else {
           SystemNavigator.pop();
         }
@@ -435,19 +451,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
               ? (incognito ? homeBgDark : homeBgLight)
               : (incognito ? Colors.grey[900] : null),
           foregroundColor: incognito ? Colors.white : null,
-          // Di beranda: ikon rumah seperti Chrome; di halaman: panah kembali.
-          leading: tab.url == null
-              ? IconButton(
-                  icon: const Icon(Icons.home_outlined),
-                  tooltip: 'Beranda',
-                  // Sudah di beranda.
-                  onPressed: () {},
-                )
-              : IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  tooltip: 'Kembali',
-                  onPressed: _goBack,
-                ),
+          // Ikon home selalu di kiri atas seperti Chrome; ketuk = beranda.
+          // Kembali ke halaman sebelumnya pakai tombol kembali HP.
+          leading: IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Beranda',
+            onPressed: _goHome,
+          ),
           // Di beranda (belum ada halaman): bilah URL disembunyikan —
           // beranda sudah punya kapsul carinya sendiri.
           title: tab.url == null
@@ -485,19 +495,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ),
           ),
           actions: <Widget>[
-            // Maju dan muat ulang hanya ada bila sedang membuka halaman.
-            if (tab.url != null)
-              IconButton(
-                icon: const Icon(Icons.arrow_forward),
-                tooltip: 'Maju',
-                onPressed: _goForward,
-              ),
-            if (tab.url != null)
-              IconButton(
-                icon: const Icon(Icons.refresh),
-                tooltip: 'Muat ulang',
-                onPressed: _reload,
-              ),
+            // Tombol + (tab baru) ala Chrome; maju dan muat ulang
+            // pindah ke menu titik tiga.
+            IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: 'Tab baru',
+              onPressed: _newTab,
+            ),
             _TabCountButton(
               count: _tabs.length,
               incognito: incognito,
@@ -539,6 +543,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 const PopupMenuItem<String>(
                   value: 'share',
                   child: Text('Bagikan'),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'forward',
+                  child: Text('Maju'),
                 ),
                 const PopupMenuItem<String>(
                   value: 'reload',
