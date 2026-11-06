@@ -156,6 +156,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   void _navigate(String input) {
     final url = toNavigationUrl(input);
+    // Tampilkan WebView segera (tab.url diset optimistis) — WebView sudah
+    // menempel di tree sejak awal (lihat body: Stack), jadi loadRequest
+    // tidak lagi dipanggil saat WebView belum ada (itu penyebab
+    // net::ERR_CACHE_MISS di v1).
+    setState(() {
+      _activeTab.url = url;
+    });
     _activeTab.controller.loadRequest(Uri.parse(url));
     _urlFocusNode.unfocus();
   }
@@ -409,9 +416,16 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 : const SizedBox(height: 3),
           ),
         ),
-        body: tab.url == null
-            ? HomeView(onNavigate: _navigate)
-            : WebViewWidget(controller: tab.controller),
+        // WebView SELALU ada di tree (di bawah). Beranda hanya menutupinya
+        // saat tab belum membuka halaman. Ini penting: loadRequest yang
+        // dipanggil saat WebView belum menempel gagal dengan
+        // net::ERR_CACHE_MISS (bug v1).
+        body: Stack(
+          children: <Widget>[
+            WebViewWidget(controller: tab.controller),
+            if (tab.url == null) HomeView(onNavigate: _navigate),
+          ],
+        ),
       ),
     );
   }
