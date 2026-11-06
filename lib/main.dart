@@ -128,11 +128,26 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void _setupController(BrowserTab tab) {
     tab.controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0x00000000))
+      // Latar OPAQUE (bukan transparan): dengan hybrid composition,
+      // latar transparan memaksa HP menggabungkan dua lapisan tiap
+      // frame saat scroll (rasa "lapisan-lapisan"). Putih untuk tab
+      // biasa, abu gelap untuk samaran; halaman web menggambar
+      // latarnya sendiri sesudah dimuat.
+      ..setBackgroundColor(
+        tab.isIncognito
+            ? const Color(0xFF212121)
+            : const Color(0xFFFFFFFF),
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (progress) {
             if (!mounted) return;
+            // Jangan rebuild seluruh halaman pada setiap tick progres
+            // (puluhan kali per detik saat memuat): cukup tiap 5 poin
+            // atau saat selesai — bilah progres tetap terlihat bergerak.
+            if (progress != 100 && (progress - tab.progress).abs() < 5) {
+              return;
+            }
             setState(() => tab.progress = progress);
           },
           onPageStarted: (url) {
@@ -658,7 +673,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
         // net::ERR_CACHE_MISS (bug v1).
         body: Stack(
           children: <Widget>[
-            WebViewWidget(controller: tab.controller),
+            // RepaintBoundary: perubahan di bilah atas/beranda tidak
+            // memaksa WebView ikut di-repaint tiap frame saat scroll.
+            RepaintBoundary(
+              child: WebViewWidget(controller: tab.controller),
+            ),
             if (tab.url == null)
               HomeView(
                 key: _homeKey,
