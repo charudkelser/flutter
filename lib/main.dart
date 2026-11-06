@@ -495,13 +495,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ),
           ),
           actions: <Widget>[
-            // Tombol + (tab baru) ala Chrome; maju dan muat ulang
-            // pindah ke menu titik tiga.
-            IconButton(
-              icon: const Icon(Icons.add),
-              tooltip: 'Tab baru',
-              onPressed: _newTab,
-            ),
+            // Tombol + (tab baru) ala Chrome; hanya saat membuka halaman
+            // situs, tidak di beranda.
+            if (tab.url != null)
+              IconButton(
+                icon: const Icon(Icons.add),
+                tooltip: 'Tab baru',
+                onPressed: _newTab,
+              ),
             _TabCountButton(
               count: _tabs.length,
               incognito: incognito,
