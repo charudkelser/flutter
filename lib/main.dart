@@ -429,11 +429,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
         appBar: AppBar(
           backgroundColor: incognito ? Colors.grey[900] : null,
           foregroundColor: incognito ? Colors.white : null,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            tooltip: 'Kembali',
-            onPressed: _goBack,
-          ),
+          // Di beranda: ikon rumah seperti Chrome; di halaman: panah kembali.
+          leading: tab.url == null
+              ? IconButton(
+                  icon: const Icon(Icons.home_outlined),
+                  tooltip: 'Beranda',
+                  // Sudah di beranda.
+                  onPressed: () {},
+                )
+              : IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  tooltip: 'Kembali',
+                  onPressed: _goBack,
+                ),
           // Di beranda (belum ada halaman): bilah URL disembunyikan —
           // beranda sudah punya kapsul carinya sendiri.
           title: tab.url == null
@@ -571,7 +579,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
         body: Stack(
           children: <Widget>[
             WebViewWidget(controller: tab.controller),
-            if (tab.url == null) HomeView(onNavigate: _navigate, incognito: incognito),
+            if (tab.url == null)
+              HomeView(
+                onNavigate: _navigate,
+                onNewIncognito: () => _newTab(incognito: true),
+                incognito: incognito,
+              ),
           ],
         ),
       ),
