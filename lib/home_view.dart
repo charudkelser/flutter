@@ -31,6 +31,7 @@ class HomeView extends StatefulWidget {
     required this.onNavigate,
     required this.onNewIncognito,
     this.incognito = false,
+    this.onScrolledChanged,
   });
 
   /// Dipanggil dengan URL tujuan saat pintasan ditekan atau pencarian
@@ -43,19 +44,30 @@ class HomeView extends StatefulWidget {
   /// Tab samaran: beranda ikut gelap seperti bilah atas.
   final bool incognito;
 
+  /// Dipanggil saat status gulir berubah (true = beranda sudah digulir).
+  final ValueChanged<bool>? onScrolledChanged;
+
   @override
-  State<HomeView> createState() => _HomeViewState();
+  State<HomeView> createState() => HomeViewState();
 }
 
-class _HomeViewState extends State<HomeView> {
+class HomeViewState extends State<HomeView> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final FocusNode _searchFocusNode = FocusNode();
   Timer? _hintTimer;
   int _hintIndex = 0;
+  bool _scrolled = false;
   List<TrendingItem> _trending = <TrendingItem>[];
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_handleScroll);
+    // Beranda baru selalu mulai dari atas (tidak digulir).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onScrolledChanged?.call(false);
+    });
     // Hint cari berputar tiap 4 detik.
     _hintTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted) return;
@@ -71,8 +83,32 @@ class _HomeViewState extends State<HomeView> {
   @override
   void dispose() {
     _hintTimer?.cancel();
+    _scrollController.removeListener(_handleScroll);
+    _scrollController.dispose();
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
+  }
+
+  void _handleScroll() {
+    final scrolled = _scrollController.offset > 16;
+    if (scrolled != _scrolled) {
+      _scrolled = scrolled;
+      widget.onScrolledChanged?.call(scrolled);
+    }
+  }
+
+  /// Dipanggil dari bilah atas saat kapsul cari di toolbar ditekan:
+  /// gulir ke atas lalu fokuskan kolom cari (keyboard terbuka).
+  void focusSearch() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    }
+    _searchFocusNode.requestFocus();
   }
 
   void _submitSearch() {
@@ -180,6 +216,7 @@ class _HomeViewState extends State<HomeView> {
       height: double.infinity,
       color: incognito ? homeBgDark : homeBgLight,
       child: SingleChildScrollView(
+        controller: _scrollController,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         child: Column(
           children: <Widget>[
@@ -200,6 +237,7 @@ class _HomeViewState extends State<HomeView> {
             // Kapsul cari besar ala Chrome.
             TextField(
               controller: _searchController,
+              focusNode: _searchFocusNode,
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _submitSearch(),
               style: TextStyle(

@@ -52,6 +52,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   final TextEditingController _urlController = TextEditingController();
   final FocusNode _urlFocusNode = FocusNode();
+  final GlobalKey<HomeViewState> _homeKey = GlobalKey<HomeViewState>();
+  bool _homeScrolled = false;
 
   BrowserTab get _activeTab =>
       _tabs.firstWhere((tab) => tab.id == _activeTabId);
@@ -212,6 +214,52 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _activeTab.url = null;
       _syncUrlBar();
     });
+  }
+
+  /// Kapsul cari di bilah atas saat beranda digulir (ala Chrome): ketuk
+  /// = kembali ke atas dan fokuskan kolom cari beranda.
+  Widget _homeToolbarCapsule() {
+    final incognito = _activeTab.isIncognito;
+    return InkWell(
+      onTap: () => _homeKey.currentState?.focusSearch(),
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        height: 48,
+        decoration: BoxDecoration(
+          color: incognito ? const Color(0xFF424242) : Colors.white,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              Icons.add,
+              size: 28,
+              color: incognito ? Colors.white : Colors.black87,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Telusuri Google atau ketik URL',
+                style: TextStyle(
+                  fontSize: 17,
+                  color: incognito ? Colors.white54 : Colors.black45,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            IconButton(
+              icon: Icon(
+                Icons.photo_camera,
+                color: incognito ? Colors.white70 : Colors.black54,
+              ),
+              tooltip: 'Telusuri dengan kamera',
+              onPressed: () => _navigate('https://lens.google.com'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Tombol kembali HP: mundur di riwayat WebView; bila tidak ada riwayat,
@@ -428,6 +476,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final tab = _activeTab;
     final incognito = tab.isIncognito;
     final loading = tab.isLoading && tab.progress < 100;
+    // Beranda digulir = bilah atas berubah jadi kapsul cari (ala Chrome).
+    final showHomeToolbarCapsule = tab.url == null && _homeScrolled;
 
     return PopScope(
       canPop: false,
@@ -453,15 +503,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
           foregroundColor: incognito ? Colors.white : null,
           // Ikon home selalu di kiri atas seperti Chrome; ketuk = beranda.
           // Kembali ke halaman sebelumnya pakai tombol kembali HP.
-          leading: IconButton(
-            icon: const Icon(Icons.home_outlined),
-            tooltip: 'Beranda',
-            onPressed: _goHome,
-          ),
-          // Di beranda (belum ada halaman): bilah URL disembunyikan —
-          // beranda sudah punya kapsul carinya sendiri.
-          title: tab.url == null
+          // Saat beranda digulir, bilah atas hanya berisi kapsul cari.
+          leading: showHomeToolbarCapsule
               ? null
+              : IconButton(
+                  icon: const Icon(Icons.home_outlined),
+                  tooltip: 'Beranda',
+                  onPressed: _goHome,
+                ),
+          // Di beranda (belum ada halaman): bilah URL disembunyikan —
+          // beranda sudah punya kapsul carinya sendiri. Saat beranda
+          // digulir, bilah atas berubah jadi kapsul cari (ala Chrome).
+          title: tab.url == null
+              ? (showHomeToolbarCapsule ? _homeToolbarCapsule() : null)
               : TextField(
             controller: _urlController,
             focusNode: _urlFocusNode,
@@ -503,12 +557,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 tooltip: 'Tab baru',
                 onPressed: _newTab,
               ),
-            _TabCountButton(
-              count: _tabs.length,
-              incognito: incognito,
-              onPressed: _openTabSwitcher,
-            ),
-            PopupMenuButton<String>(
+            if (!showHomeToolbarCapsule)
+              _TabCountButton(
+                count: _tabs.length,
+                incognito: incognito,
+                onPressed: _openTabSwitcher,
+              ),
+            if (!showHomeToolbarCapsule)
+              PopupMenuButton<String>(
               tooltip: 'Menu',
               onSelected: _onMenuSelected,
               itemBuilder: (context) => <PopupMenuEntry<String>>[
@@ -596,9 +652,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
             WebViewWidget(controller: tab.controller),
             if (tab.url == null)
               HomeView(
+                key: _homeKey,
                 onNavigate: _navigate,
                 onNewIncognito: () => _newTab(incognito: true),
                 incognito: incognito,
+                onScrolledChanged: (scrolled) {
+                  if (scrolled != _homeScrolled) {
+                    setState(() => _homeScrolled = scrolled);
+                  }
+                },
               ),
           ],
         ),
